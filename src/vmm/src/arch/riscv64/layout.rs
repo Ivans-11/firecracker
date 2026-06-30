@@ -34,11 +34,13 @@ pub const GSI_MSI_NUM: u32 = GSI_MSI_END - GSI_MSI_START + 1;
 /// Start of the RISC-V AIA APLIC MMIO range.
 pub const AIA_APLIC_MEM_START: u64 = 0x0d00_0000;
 /// Size of the RISC-V AIA APLIC MMIO range.
-pub const AIA_APLIC_MEM_SIZE: u64 = 0x8000;
+pub const AIA_APLIC_MEM_SIZE: u64 = 0x4000;
 /// Start of the RISC-V AIA IMSIC MMIO range.
 pub const AIA_IMSIC_MEM_START: u64 = 0x2800_0000;
 /// Size of one RISC-V AIA IMSIC MMIO page.
 pub const AIA_IMSIC_MEM_SIZE: u64 = 0x1000;
+/// Number of interrupt identities exposed by the guest IMSIC.
+pub const AIA_IMSIC_NUM_IDS: u32 = 255;
 
 /// Start of 32-bit MMIO space, matching the conventional RISC-V virt map.
 pub const MMIO32_MEM_START: u64 = 0x1000_0000;

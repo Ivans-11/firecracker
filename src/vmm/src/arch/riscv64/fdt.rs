@@ -144,7 +144,7 @@ fn create_aia_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
     fdt.property_null("msi-controller")?;
     fdt.property_u32("#interrupt-cells", 0)?;
     fdt.property_u32("phandle", IMSIC_PHANDLE)?;
-    fdt.property_u32("riscv,num-ids", 255)?;
+    fdt.property_u32("riscv,num-ids", layout::AIA_IMSIC_NUM_IDS)?;
     fdt.property_array_u64(
         "reg",
         &[

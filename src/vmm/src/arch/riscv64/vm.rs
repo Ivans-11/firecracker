@@ -4,10 +4,10 @@
 use std::sync::Mutex;
 
 use kvm_bindings::{
-    KVM_DEV_RISCV_AIA_ADDR_APLIC, KVM_DEV_RISCV_AIA_CONFIG_MODE, KVM_DEV_RISCV_AIA_CONFIG_SRCS,
-    KVM_DEV_RISCV_AIA_CTRL_INIT, KVM_DEV_RISCV_AIA_GRP_ADDR, KVM_DEV_RISCV_AIA_GRP_CONFIG,
-    KVM_DEV_RISCV_AIA_GRP_CTRL, KVM_DEV_RISCV_AIA_MODE_AUTO, kvm_create_device, kvm_device_attr,
-    kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
+    KVM_DEV_RISCV_AIA_ADDR_APLIC, KVM_DEV_RISCV_AIA_CONFIG_IDS, KVM_DEV_RISCV_AIA_CONFIG_MODE,
+    KVM_DEV_RISCV_AIA_CONFIG_SRCS, KVM_DEV_RISCV_AIA_CTRL_INIT, KVM_DEV_RISCV_AIA_GRP_ADDR,
+    KVM_DEV_RISCV_AIA_GRP_CONFIG, KVM_DEV_RISCV_AIA_GRP_CTRL, KVM_DEV_RISCV_AIA_MODE_AUTO,
+    kvm_create_device, kvm_device_attr, kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
 };
 use kvm_ioctls::DeviceFd;
 use serde::{Deserialize, Serialize};
@@ -56,8 +56,8 @@ impl KvmVm {
     }
 
     /// Post-vCPU creation setup.
-    pub fn arch_post_create_vcpus(&mut self, _: u8) -> Result<(), KvmVmError> {
-        self.create_aia_device()?;
+    pub fn arch_post_create_vcpus(&mut self, vcpu_count: u8) -> Result<(), KvmVmError> {
+        self.create_aia_device(vcpu_count)?;
         Ok(())
     }
 
@@ -76,7 +76,7 @@ impl KvmVm {
         Ok(())
     }
 
-    fn create_aia_device(&mut self) -> Result<(), KvmVmError> {
+    fn create_aia_device(&mut self, vcpu_count: u8) -> Result<(), KvmVmError> {
         let mut aia_device = kvm_create_device {
             type_: kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
             fd: 0,
@@ -96,6 +96,14 @@ impl KvmVm {
             &mode,
         )?;
 
+        let ids = layout::AIA_IMSIC_NUM_IDS;
+        set_device_attr(
+            &aia_device,
+            KVM_DEV_RISCV_AIA_GRP_CONFIG,
+            KVM_DEV_RISCV_AIA_CONFIG_IDS.into(),
+            &ids,
+        )?;
+
         let sources = layout::GSI_LEGACY_NUM;
         set_device_attr(
             &aia_device,
@@ -112,8 +120,17 @@ impl KvmVm {
             &aplic_addr,
         )?;
 
-        let imsic_addr = layout::AIA_IMSIC_MEM_START;
-        set_device_attr(&aia_device, KVM_DEV_RISCV_AIA_GRP_ADDR, 1, &imsic_addr)?;
+        for vcpu_id in 0..vcpu_count {
+            let imsic_addr =
+                layout::AIA_IMSIC_MEM_START + layout::AIA_IMSIC_MEM_SIZE * u64::from(vcpu_id);
+            let imsic_attr = KVM_DEV_RISCV_AIA_ADDR_APLIC + 1 + u32::from(vcpu_id);
+            set_device_attr(
+                &aia_device,
+                KVM_DEV_RISCV_AIA_GRP_ADDR,
+                imsic_attr.into(),
+                &imsic_addr,
+            )?;
+        }
 
         let init_attr = kvm_device_attr {
             group: KVM_DEV_RISCV_AIA_GRP_CTRL,
