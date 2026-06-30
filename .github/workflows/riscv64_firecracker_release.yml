@@ -26,6 +26,7 @@ jobs:
       TARGET: riscv64gc-unknown-linux-musl
       ASSET_DIR: release-riscv64gc-unknown-linux-musl
       ASSET_NAME: firecracker-riscv64gc-unknown-linux-musl
+      BINDGEN_EXTRA_CLANG_ARGS: -I/usr/include/x86_64-linux-gnu
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +34,7 @@ jobs:
       - name: Install host build dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev
+          apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev linux-libc-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           rustup target add "$TARGET" || true
 
