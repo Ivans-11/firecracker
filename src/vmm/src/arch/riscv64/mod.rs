@@ -15,9 +15,9 @@ pub mod vm;
 use std::cmp::min;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::Read;
 
-use linux_loader::loader::Cmdline;
+use linux_loader::loader::pe::PE as Loader;
+use linux_loader::loader::{Cmdline, KernelLoader};
 use vm_memory::{GuestMemoryError, GuestMemoryRegion};
 
 use crate::arch::{BootProtocol, EntryPoint, arch_memory_regions_with_gap};
@@ -162,15 +162,16 @@ pub fn load_kernel(
     let mut kernel_file = kernel
         .try_clone()
         .map_err(|_| ConfigurationError::KernelFile)?;
-    let load_addr = GuestAddress(get_kernel_start());
-    let mut kernel_image = Vec::new();
-    kernel_file
-        .read_to_end(&mut kernel_image)
-        .map_err(|_| ConfigurationError::KernelFile)?;
-    guest_memory.write_slice(kernel_image.as_slice(), load_addr)?;
+
+    let entry_addr = Loader::load(
+        guest_memory,
+        Some(GuestAddress(get_kernel_start())),
+        &mut kernel_file,
+        None,
+    )?;
 
     Ok(EntryPoint {
-        entry_addr: load_addr,
+        entry_addr: entry_addr.kernel_load,
         protocol: BootProtocol::LinuxBoot,
     })
 }
