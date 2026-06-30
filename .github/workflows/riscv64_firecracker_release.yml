@@ -1,0 +1,56 @@
+name: RISC-V Firecracker Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to create or update. Leave empty to only upload the workflow artifact.
+        required: false
+        type: string
+        default: ""
+  push:
+    tags:
+      - "riscv64-*"
+      - "firecracker-riscv64-*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build riscv64gc musl Firecracker
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/rust-cross/rust-musl-cross:riscv64gc-musl
+    env:
+      TARGET: riscv64gc-unknown-linux-musl
+      ASSET_DIR: release-riscv64gc-unknown-linux-musl
+      ASSET_NAME: firecracker-riscv64gc-unknown-linux-musl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          rustup target add "$TARGET" || true
+          command -v riscv64-linux-musl-gcc
+
+      - name: Build release asset
+        run: tools/riscv64-release-firecracker.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firecracker-riscv64gc-unknown-linux-musl
+          path: release-riscv64gc-unknown-linux-musl/*
+          if-no-files-found: error
+
+      - name: Upload GitHub release asset
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.release_tag }}
+          files: release-riscv64gc-unknown-linux-musl/*
