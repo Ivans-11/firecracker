@@ -38,6 +38,7 @@ pub fn create_fdt(
     cmdline: CString,
     device_manager: &DeviceManager,
     initrd: &Option<InitrdConfig>,
+    use_aia: bool,
 ) -> Result<Vec<u8>, FdtError> {
     let mut fdt = FdtWriter::new()?;
 
@@ -46,13 +47,17 @@ pub fn create_fdt(
     fdt.property_string("model", "firecracker,riscv64-virt")?;
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
-    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+    if use_aia {
+        fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+    }
 
     create_cpu_nodes(&mut fdt, vcpu_count)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, device_manager, initrd)?;
-    create_aia_nodes(&mut fdt, vcpu_count)?;
-    create_devices_node(&mut fdt, device_manager)?;
+    if use_aia {
+        create_aia_nodes(&mut fdt, vcpu_count)?;
+    }
+    create_devices_node(&mut fdt, device_manager, use_aia)?;
 
     fdt.end_node(root)?;
     Ok(fdt.finish()?)
@@ -181,25 +186,37 @@ fn create_aia_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
     Ok(())
 }
 
-fn create_virtio_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<(), FdtError> {
+fn create_virtio_node(
+    fdt: &mut FdtWriter,
+    dev_info: &MMIODeviceInfo,
+    use_aia: bool,
+) -> Result<(), FdtError> {
     let virtio_mmio = fdt.begin_node(&format!("virtio_mmio@{:x}", dev_info.addr))?;
     fdt.property_null("dma-coherent")?;
     fdt.property_string("compatible", "virtio,mmio")?;
     fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
-    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
-    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+    if use_aia {
+        fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+    }
     fdt.end_node(virtio_mmio)?;
     Ok(())
 }
 
-fn create_serial_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<(), FdtError> {
+fn create_serial_node(
+    fdt: &mut FdtWriter,
+    dev_info: &MMIODeviceInfo,
+    use_aia: bool,
+) -> Result<(), FdtError> {
     let serial = fdt.begin_node(&format!("uart@{:x}", dev_info.addr))?;
     fdt.property_string("compatible", "ns16550a")?;
     fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
     fdt.property_u32("clock-frequency", UART_CLOCK_FREQUENCY)?;
     fdt.property_u32("current-speed", 115_200)?;
-    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
-    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+    if use_aia {
+        fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+    }
     fdt.end_node(serial)?;
     Ok(())
 }
@@ -207,15 +224,16 @@ fn create_serial_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<
 fn create_devices_node(
     fdt: &mut FdtWriter,
     device_manager: &DeviceManager,
+    use_aia: bool,
 ) -> Result<(), FdtError> {
     if let Some(serial_info) = device_manager.mmio_devices.serial_device_info() {
-        create_serial_node(fdt, serial_info)?;
+        create_serial_node(fdt, serial_info, use_aia)?;
     }
 
     let mut virtio_mmio = device_manager.mmio_devices.virtio_device_info();
     virtio_mmio.sort_by_key(|info| info.addr);
     for device_info in virtio_mmio {
-        create_virtio_node(fdt, device_info)?;
+        create_virtio_node(fdt, device_info, use_aia)?;
     }
 
     Ok(())

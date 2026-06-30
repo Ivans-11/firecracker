@@ -9,7 +9,7 @@ use kvm_bindings::{
     KVM_DEV_RISCV_AIA_GRP_CONFIG, KVM_DEV_RISCV_AIA_GRP_CTRL, KVM_DEV_RISCV_AIA_MODE_AUTO,
     kvm_create_device, kvm_device_attr, kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
 };
-use kvm_ioctls::DeviceFd;
+use kvm_ioctls::{Cap, DeviceFd};
 use serde::{Deserialize, Serialize};
 
 use super::layout;
@@ -57,7 +57,9 @@ impl KvmVm {
 
     /// Post-vCPU creation setup.
     pub fn arch_post_create_vcpus(&mut self, vcpu_count: u8) -> Result<(), KvmVmError> {
-        self.create_aia_device(vcpu_count)?;
+        if self.common.fd.check_extension(Cap::DeviceCtrl) {
+            self.create_aia_device(vcpu_count)?;
+        }
         Ok(())
     }
 

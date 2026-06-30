@@ -16,6 +16,7 @@ use std::cmp::min;
 use std::fmt::Debug;
 use std::fs::File;
 
+use kvm_ioctls::Cap;
 use linux_loader::loader::pe::PE as Loader;
 use linux_loader::loader::{Cmdline, KernelLoader};
 use vm_memory::{GuestMemoryError, GuestMemoryRegion};
@@ -114,6 +115,7 @@ pub fn configure_system_for_boot(
         cmdline,
         device_manager,
         initrd,
+        vm.common.fd.check_extension(Cap::DeviceCtrl),
     )?;
     vm.guest_memory().write_slice(
         fdt.as_slice(),

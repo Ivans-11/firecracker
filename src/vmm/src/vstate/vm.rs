@@ -632,6 +632,11 @@ impl KvmVm {
 
     /// Register a device IRQ
     pub fn register_irq(&self, fd: &EventFd, gsi: u32) -> Result<(), errno::Error> {
+        #[cfg(target_arch = "riscv64")]
+        if !self.common.fd.check_extension(kvm_ioctls::Cap::Irqfd) {
+            return Ok(());
+        }
+
         self.common.fd.register_irqfd(fd, gsi)?;
 
         let mut entry = kvm_irq_routing_entry {

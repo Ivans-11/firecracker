@@ -422,6 +422,7 @@ fn handle_kvm_exit(
 ) -> Result<VcpuEmulation, VcpuError> {
     match emulation_result {
         Ok(run) => match run {
+            VcpuExit::Intr => Ok(VcpuEmulation::Interrupted),
             VcpuExit::MmioRead(addr, data) => {
                 data.fill(0);
                 if let Some(mmio_bus) = &peripherals.mmio_bus {
@@ -735,6 +736,9 @@ pub(crate) mod tests {
                 EmulationError::FaultyKvmExit("InternalError".to_string())
             )
         );
+
+        let res = handle_kvm_exit(&mut vcpu.kvm_vcpu.peripherals, Ok(VcpuExit::Intr));
+        assert_eq!(res.unwrap(), VcpuEmulation::Interrupted);
 
         let res = handle_kvm_exit(
             &mut vcpu.kvm_vcpu.peripherals,
