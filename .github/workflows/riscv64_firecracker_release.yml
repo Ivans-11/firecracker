@@ -36,7 +36,40 @@ jobs:
           apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           rustup target add "$TARGET" || true
+
+      - name: Configure RISC-V musl linker
+        run: |
+          set -eu
+          export PATH="/usr/local/musl/bin:/opt/riscv64-linux-musl/bin:/opt/riscv64gc-linux-musl/bin:$PATH"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+          linker=
+          for candidate in \
+            riscv64-linux-musl-gcc \
+            riscv64-unknown-linux-musl-gcc \
+            riscv64gc-unknown-linux-musl-gcc \
+            riscv64gc-linux-musl-gcc
+          do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              linker=$(command -v "$candidate")
+              break
+            fi
+          done
+
+          if [ -z "$linker" ]; then
+            linker=$(find /usr/local /opt -type f -name '*riscv*musl*gcc' -perm /111 2>/dev/null | sort | head -n1 || true)
+          fi
+          if [ -z "$linker" ]; then
+            echo "No RISC-V musl gcc linker found. Available RISC-V toolchain files:" >&2
+            find /usr/local /opt -name '*riscv*' 2>/dev/null | sort >&2 || true
+            exit 1
+          fi
+
+          if [ "$linker" != "/usr/local/bin/riscv64-linux-musl-gcc" ]; then
+            ln -sf "$linker" /usr/local/bin/riscv64-linux-musl-gcc
+          fi
           command -v riscv64-linux-musl-gcc
+          riscv64-linux-musl-gcc --version | head -n1
 
       - name: Build release asset
         run: tools/riscv64-release-firecracker.sh
