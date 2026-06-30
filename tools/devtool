@@ -507,7 +507,7 @@ cmd_help() {
     checkstyle
         Run style checks
 
-    checkbuild [--all|-m x86_64|aarch64]
+    checkbuild [--all|-m x86_64|aarch64|riscv64]
         Run cargo check on the target architecture (supports cross compilation).
 EOF
 }
@@ -1242,7 +1242,7 @@ cmd_checkstyle() {
 
 cmd_checkbuild() {
     TARGET_ARCH=$(uname -m)
-    SUPPORTED_ARCHS=(x86_64 aarch64)
+    SUPPORTED_ARCHS=(x86_64 aarch64 riscv64)
     while [ $# -gt 0 ]; do
         case "$1" in
             "-h"|"--help") { cmd_help; exit 1; } ;;
@@ -1267,8 +1267,14 @@ cmd_checkbuild() {
         die "Unknown architecture: $TARGET_ARCH. Supported architectures: ${SUPPORTED_ARCHS[*]}"
     fi
 
-    # Use GNU target to check build as musl has issues with cross-compilation
-    cmd_sh "cargo clippy --target ${TARGET_ARCH}-unknown-linux-gnu --all --all-targets --all-features -- -D warnings" \
+    if [[ $TARGET_ARCH == "riscv64" ]]; then
+        TARGET_TRIPLE="riscv64gc-unknown-linux-musl"
+    else
+        # Use GNU target to check build as musl has issues with cross-compilation
+        TARGET_TRIPLE="${TARGET_ARCH}-unknown-linux-gnu"
+    fi
+
+    cmd_sh "cargo clippy --target ${TARGET_TRIPLE} --all --all-targets --all-features -- -D warnings" \
         || die "Error running build checks for $TARGET_ARCH"
     say "Build check passed for $TARGET_ARCH"
 }

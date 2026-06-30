@@ -43,6 +43,9 @@ const SNAPSHOT_MAGIC_ID: u64 = 0x0710_1984_8664_0000u64;
 #[cfg(target_arch = "aarch64")]
 const SNAPSHOT_MAGIC_ID: u64 = 0x0710_1984_AAAA_0000u64;
 
+#[cfg(target_arch = "riscv64")]
+const SNAPSHOT_MAGIC_ID: u64 = 0x0710_1984_5256_0000u64;
+
 /// Maximum size in bytes for snapshot deserialization to prevent DOS attacks.
 /// Snapshots contain VM state which can be large, but we set a reasonable upper bound.
 /// This limit is 10MB which should be sufficient for any legitimate snapshot.

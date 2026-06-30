@@ -42,6 +42,22 @@ pub use crate::arch::x86_64::{
     initrd_load_addr, layout::*, load_kernel,
 };
 
+/// Module for riscv64 related functionality.
+#[cfg(target_arch = "riscv64")]
+pub mod riscv64;
+
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::kvm::{Kvm, KvmArchError, OptionalCapabilities};
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::vcpu::*;
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::vm::{KvmVm, KvmVmError, VmState};
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::{
+    ConfigurationError, arch_memory_regions, configure_system_for_boot, get_kernel_start,
+    initrd_load_addr, layout::*, load_kernel,
+};
+
 /// Types of devices that can get attached to this platform.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Copy, Serialize, Deserialize)]
 pub enum DeviceType {

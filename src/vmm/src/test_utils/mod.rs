@@ -79,7 +79,7 @@ pub fn create_vmm(
     let empty_seccomp_filters = get_empty_filters();
 
     let boot_source_cfg = MockBootSourceConfig::new().with_default_boot_args();
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     let boot_source_cfg: BootSourceConfig = boot_source_cfg.into();
     #[cfg(target_arch = "x86_64")]
     let boot_source_cfg: BootSourceConfig = match _kernel_image {

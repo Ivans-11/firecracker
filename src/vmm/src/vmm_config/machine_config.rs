@@ -266,10 +266,16 @@ impl MachineConfig {
             return Err(MachineConfigError::InvalidMemorySize);
         }
 
+        #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
         let cpu_template = match update.cpu_template {
             None => self.cpu_template.clone(),
             Some(StaticCpuTemplate::None) => None,
             Some(other) => Some(CpuTemplateType::Static(other)),
+        };
+        #[cfg(target_arch = "riscv64")]
+        let cpu_template = match update.cpu_template {
+            None => self.cpu_template.clone(),
+            Some(StaticCpuTemplate::None) => None,
         };
 
         Ok(MachineConfig {

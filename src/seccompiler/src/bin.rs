@@ -13,7 +13,7 @@ struct Cli {
         short,
         long,
         help = "The computer architecture where the BPF program runs. Supported architectures: \
-                x86_64, aarch64."
+                x86_64, aarch64, riscv64."
     )]
     target_arch: String,
     #[arg(short, long, help = "File path of the JSON input.")]

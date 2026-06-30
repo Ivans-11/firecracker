@@ -526,6 +526,12 @@ impl Vmm {
                     .save_state(&mpidrs)
                     .map_err(MicrovmStateError::SaveVmState)?
             }
+            #[cfg(target_arch = "riscv64")]
+            {
+                kvm_vm
+                    .save_state(&[])
+                    .map_err(MicrovmStateError::SaveVmState)?
+            }
         };
 
         Ok(MicrovmState {

@@ -34,6 +34,8 @@ pub fn dump(vmm: Arc<Mutex<Vmm>>) -> Result<Fingerprint, FingerprintDumpError> {
         microcode_version: read_sysfs_file(
             "/sys/devices/system/cpu/cpu0/regs/identification/revidr_el1",
         )?,
+        #[cfg(target_arch = "riscv64")]
+        microcode_version: "unavailable".to_string(),
         bios_version: read_sysfs_file("/sys/devices/virtual/dmi/id/bios_version")?,
         bios_revision: read_sysfs_file("/sys/devices/virtual/dmi/id/bios_release")?,
         guest_cpu_config: crate::template::dump::dump(vmm)?,

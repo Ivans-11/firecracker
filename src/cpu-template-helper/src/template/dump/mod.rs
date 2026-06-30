@@ -3,6 +3,8 @@
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
+#[cfg(target_arch = "riscv64")]
+mod riscv64;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 
@@ -13,6 +15,8 @@ use vmm::{DumpCpuConfigError, Vmm};
 
 #[cfg(target_arch = "aarch64")]
 use crate::template::dump::aarch64::config_to_template;
+#[cfg(target_arch = "riscv64")]
+use crate::template::dump::riscv64::config_to_template;
 #[cfg(target_arch = "x86_64")]
 use crate::template::dump::x86_64::config_to_template;
 

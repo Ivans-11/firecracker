@@ -143,7 +143,7 @@ impl PciSegment {
         Ok(segment)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub(crate) fn new(
         id: u16,
         vm: &Arc<KvmVm>,

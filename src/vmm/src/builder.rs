@@ -489,6 +489,14 @@ pub fn build_microvm_from_snapshot(
     #[cfg(target_arch = "x86_64")]
     vm.restore_state(&microvm_state.vm_state, clock_realtime)?;
 
+    #[cfg(target_arch = "riscv64")]
+    {
+        if clock_realtime {
+            return Err(BuildMicrovmFromSnapshotError::UnsupportedClockRealtime);
+        }
+        vm.restore_state(&[], &microvm_state.vm_state)?;
+    }
+
     // Restore the boot source config paths.
     vm_resources.boot_source.config = microvm_state.vm_info.boot_source;
 

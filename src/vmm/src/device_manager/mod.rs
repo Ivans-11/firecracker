@@ -181,6 +181,11 @@ impl DeviceManager {
             })
         }
 
+        #[cfg(target_arch = "riscv64")]
+        {
+            None
+        }
+
         #[cfg(target_arch = "x86_64")]
         {
             self.legacy_devices.as_ref().map(|legacy| {
@@ -226,7 +231,7 @@ impl DeviceManager {
         Ok(legacy_devices)
     }
 
-    #[cfg_attr(target_arch = "aarch64", allow(unused))]
+    #[cfg_attr(any(target_arch = "aarch64", target_arch = "riscv64"), allow(unused))]
     pub fn new(
         event_manager: &mut EventManager,
         vcpus_exit_evt: &EventFd,

@@ -17,6 +17,11 @@ mod x86_64;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::verify;
 
+#[cfg(target_arch = "riscv64")]
+mod riscv64;
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::verify;
+
 #[rustfmt::skip]
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 pub enum VerifyError {
