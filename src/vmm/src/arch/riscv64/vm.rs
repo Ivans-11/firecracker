@@ -3,8 +3,16 @@
 
 use std::sync::Mutex;
 
+use kvm_bindings::{
+    KVM_DEV_RISCV_AIA_ADDR_APLIC, KVM_DEV_RISCV_AIA_CONFIG_MODE, KVM_DEV_RISCV_AIA_CONFIG_SRCS,
+    KVM_DEV_RISCV_AIA_CTRL_INIT, KVM_DEV_RISCV_AIA_GRP_ADDR, KVM_DEV_RISCV_AIA_GRP_CONFIG,
+    KVM_DEV_RISCV_AIA_GRP_CTRL, KVM_DEV_RISCV_AIA_MODE_AUTO, kvm_create_device, kvm_device_attr,
+    kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
+};
+use kvm_ioctls::DeviceFd;
 use serde::{Deserialize, Serialize};
 
+use super::layout;
 use crate::Kvm;
 use crate::snapshot::Persist;
 use crate::vstate::memory::{GuestMemoryExtension, GuestMemoryState};
@@ -16,6 +24,7 @@ use crate::vstate::vm::{VmCommon, VmError};
 pub struct KvmVm {
     /// Architecture independent VM state.
     pub common: VmCommon,
+    aia_device: Option<DeviceFd>,
 }
 
 /// Error type for RISC-V VM setup and restore.
@@ -23,6 +32,10 @@ pub struct KvmVm {
 pub enum KvmVmError {
     /// RISC-V in-kernel irqchip support is not wired up yet.
     UnsupportedIrqchip,
+    /// Failed to create RISC-V AIA device: {0}
+    CreateAia(kvm_ioctls::Error),
+    /// Failed to configure RISC-V AIA device attribute: {0}
+    AiaDeviceAttribute(kvm_ioctls::Error),
     /// Failed to restore resource allocator: {0}
     ResourceAllocator(#[from] vm_allocator::Error),
 }
@@ -31,7 +44,10 @@ impl KvmVm {
     /// Create a new `KvmVm` struct.
     pub fn new(kvm: Kvm) -> Result<KvmVm, VmError> {
         let common = Self::create_common(kvm)?;
-        Ok(KvmVm { common })
+        Ok(KvmVm {
+            common,
+            aia_device: None,
+        })
     }
 
     /// Pre-vCPU creation setup.
@@ -41,6 +57,7 @@ impl KvmVm {
 
     /// Post-vCPU creation setup.
     pub fn arch_post_create_vcpus(&mut self, _: u8) -> Result<(), KvmVmError> {
+        self.create_aia_device()?;
         Ok(())
     }
 
@@ -58,6 +75,76 @@ impl KvmVm {
             Mutex::new(ResourceAllocator::restore((), &state.resource_allocator)?);
         Ok(())
     }
+
+    fn create_aia_device(&mut self) -> Result<(), KvmVmError> {
+        let mut aia_device = kvm_create_device {
+            type_: kvm_device_type_KVM_DEV_TYPE_RISCV_AIA,
+            fd: 0,
+            flags: 0,
+        };
+        let aia_device = self
+            .common
+            .fd
+            .create_device(&mut aia_device)
+            .map_err(KvmVmError::CreateAia)?;
+
+        let mode = KVM_DEV_RISCV_AIA_MODE_AUTO;
+        set_device_attr(
+            &aia_device,
+            KVM_DEV_RISCV_AIA_GRP_CONFIG,
+            KVM_DEV_RISCV_AIA_CONFIG_MODE.into(),
+            &mode,
+        )?;
+
+        let sources = layout::GSI_LEGACY_NUM;
+        set_device_attr(
+            &aia_device,
+            KVM_DEV_RISCV_AIA_GRP_CONFIG,
+            KVM_DEV_RISCV_AIA_CONFIG_SRCS.into(),
+            &sources,
+        )?;
+
+        let aplic_addr = layout::AIA_APLIC_MEM_START;
+        set_device_attr(
+            &aia_device,
+            KVM_DEV_RISCV_AIA_GRP_ADDR,
+            KVM_DEV_RISCV_AIA_ADDR_APLIC.into(),
+            &aplic_addr,
+        )?;
+
+        let imsic_addr = layout::AIA_IMSIC_MEM_START;
+        set_device_attr(&aia_device, KVM_DEV_RISCV_AIA_GRP_ADDR, 1, &imsic_addr)?;
+
+        let init_attr = kvm_device_attr {
+            group: KVM_DEV_RISCV_AIA_GRP_CTRL,
+            attr: KVM_DEV_RISCV_AIA_CTRL_INIT.into(),
+            addr: 0,
+            flags: 0,
+        };
+        aia_device
+            .set_device_attr(&init_attr)
+            .map_err(KvmVmError::AiaDeviceAttribute)?;
+
+        self.aia_device = Some(aia_device);
+        Ok(())
+    }
+}
+
+fn set_device_attr<T>(
+    device: &DeviceFd,
+    group: u32,
+    attr: u64,
+    value: &T,
+) -> Result<(), KvmVmError> {
+    let device_attr = kvm_device_attr {
+        group,
+        attr,
+        addr: value as *const T as u64,
+        flags: 0,
+    };
+    device
+        .set_device_attr(&device_attr)
+        .map_err(KvmVmError::AiaDeviceAttribute)
 }
 
 /// RISC-V VM state.

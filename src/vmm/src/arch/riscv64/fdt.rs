@@ -14,10 +14,11 @@ use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestRegionTy
 
 const ADDRESS_CELLS: u32 = 2;
 const SIZE_CELLS: u32 = 2;
-const PLIC_PHANDLE: u32 = 1;
+const APLIC_PHANDLE: u32 = 1;
+const IMSIC_PHANDLE: u32 = 2;
 const CPU_INTC_PHANDLE_BASE: u32 = 0x100;
-const PLIC_CONTEXT_SUPERVISOR_EXTERNAL: u32 = 9;
-const PLIC_CONTEXT_MACHINE_EXTERNAL: u32 = 11;
+const IRQ_TYPE_LEVEL_HIGH: u32 = 4;
+const RISCV_SUPERVISOR_EXTERNAL_IRQ: u32 = 9;
 const TIMEBASE_FREQUENCY: u32 = 10_000_000;
 const UART_CLOCK_FREQUENCY: u32 = 3_686_400;
 
@@ -45,12 +46,12 @@ pub fn create_fdt(
     fdt.property_string("model", "firecracker,riscv64-virt")?;
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
-    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
+    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
 
     create_cpu_nodes(&mut fdt, vcpu_count)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, device_manager, initrd)?;
-    create_plic_node(&mut fdt, vcpu_count)?;
+    create_aia_nodes(&mut fdt, vcpu_count)?;
     create_devices_node(&mut fdt, device_manager)?;
 
     fdt.end_node(root)?;
@@ -133,27 +134,50 @@ fn create_chosen_node(
     Ok(())
 }
 
-fn create_plic_node(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError> {
-    let plic = fdt.begin_node(&format!("plic@{:x}", layout::PLIC_MEM_START))?;
-    fdt.property_string("compatible", "riscv,plic0")?;
+fn create_aia_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError> {
+    let imsic = fdt.begin_node(&format!(
+        "interrupt-controller@{:x}",
+        layout::AIA_IMSIC_MEM_START
+    ))?;
+    fdt.property_string("compatible", "riscv,imsics")?;
     fdt.property_null("interrupt-controller")?;
-    fdt.property_u32("#interrupt-cells", 1)?;
-    fdt.property_u32("#address-cells", 0)?;
-    fdt.property_u32("phandle", PLIC_PHANDLE)?;
-    fdt.property_array_u64("reg", &[layout::PLIC_MEM_START, layout::PLIC_MEM_SIZE])?;
-    fdt.property_u32("riscv,ndev", layout::GSI_LEGACY_NUM)?;
+    fdt.property_null("msi-controller")?;
+    fdt.property_u32("#interrupt-cells", 0)?;
+    fdt.property_u32("phandle", IMSIC_PHANDLE)?;
+    fdt.property_u32("riscv,num-ids", 255)?;
+    fdt.property_array_u64(
+        "reg",
+        &[
+            layout::AIA_IMSIC_MEM_START,
+            layout::AIA_IMSIC_MEM_SIZE * u64::from(vcpu_count),
+        ],
+    )?;
 
-    let mut interrupts_extended = Vec::with_capacity(vcpu_count as usize * 4);
+    let mut interrupts_extended = Vec::with_capacity(vcpu_count as usize * 2);
     for cpu_index in 0..vcpu_count {
         let cpu_phandle = cpu_intc_phandle(cpu_index);
         interrupts_extended.push(cpu_phandle);
-        interrupts_extended.push(PLIC_CONTEXT_MACHINE_EXTERNAL);
-        interrupts_extended.push(cpu_phandle);
-        interrupts_extended.push(PLIC_CONTEXT_SUPERVISOR_EXTERNAL);
+        interrupts_extended.push(RISCV_SUPERVISOR_EXTERNAL_IRQ);
     }
     fdt.property_array_u32("interrupts-extended", interrupts_extended.as_slice())?;
+    fdt.end_node(imsic)?;
 
-    fdt.end_node(plic)?;
+    let aplic = fdt.begin_node(&format!(
+        "interrupt-controller@{:x}",
+        layout::AIA_APLIC_MEM_START
+    ))?;
+    fdt.property_string("compatible", "riscv,aplic")?;
+    fdt.property_null("interrupt-controller")?;
+    fdt.property_u32("#interrupt-cells", 2)?;
+    fdt.property_u32("#address-cells", 0)?;
+    fdt.property_u32("phandle", APLIC_PHANDLE)?;
+    fdt.property_u32("msi-parent", IMSIC_PHANDLE)?;
+    fdt.property_u32("riscv,num-sources", layout::GSI_LEGACY_NUM)?;
+    fdt.property_array_u64(
+        "reg",
+        &[layout::AIA_APLIC_MEM_START, layout::AIA_APLIC_MEM_SIZE],
+    )?;
+    fdt.end_node(aplic)?;
     Ok(())
 }
 
@@ -162,8 +186,8 @@ fn create_virtio_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<
     fdt.property_null("dma-coherent")?;
     fdt.property_string("compatible", "virtio,mmio")?;
     fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
-    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
-    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap()])?;
+    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
     fdt.end_node(virtio_mmio)?;
     Ok(())
 }
@@ -174,8 +198,8 @@ fn create_serial_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<
     fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
     fdt.property_u32("clock-frequency", UART_CLOCK_FREQUENCY)?;
     fdt.property_u32("current-speed", 115_200)?;
-    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
-    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap()])?;
+    fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
+    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
     fdt.end_node(serial)?;
     Ok(())
 }
