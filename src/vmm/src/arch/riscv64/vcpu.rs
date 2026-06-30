@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::arch::EntryPoint;
 use crate::cpu_config::riscv64::CpuConfiguration;
-use crate::logger::{IncMetric, METRICS, error};
+use crate::logger::{IncMetric, METRICS, error, info};
 use crate::vcpu::{VcpuConfig, VcpuError};
 use crate::vstate::bus::Bus;
 use crate::vstate::memory::{Address, GuestMemoryMmap};
@@ -130,6 +130,11 @@ impl KvmVcpu {
 impl Peripherals {
     /// Runs architecture-specific vCPU emulation.
     pub fn run_arch_emulation(&self, exit: VcpuExit) -> Result<VcpuEmulation, VcpuError> {
+        if matches!(exit, VcpuExit::Shutdown) {
+            info!("Received KVM_EXIT_SHUTDOWN");
+            return Ok(VcpuEmulation::Stopped);
+        }
+
         METRICS.vcpu.failures.inc();
         error!("Unexpected exit reason on vcpu run: {:?}", exit);
         Err(VcpuError::UnhandledKvmExit(format!("{:?}", exit)))
