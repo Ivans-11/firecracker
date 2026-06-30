@@ -26,21 +26,25 @@ jobs:
       TARGET: riscv64gc-unknown-linux-musl
       ASSET_DIR: release-riscv64gc-unknown-linux-musl
       ASSET_NAME: firecracker-riscv64gc-unknown-linux-musl
-      BINDGEN_EXTRA_CLANG_ARGS: -I/usr/include/x86_64-linux-gnu
-      TARGET_CFLAGS: -I/usr/include
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install host build dependencies
+      - name: Install build dependencies
         run: |
+          set -eu
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev linux-libc-dev
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            file \
+            libseccomp-dev \
+            linux-libc-dev \
+            linux-libc-dev-riscv64-cross
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           rustup target add "$TARGET" || true
           rustup component add rustfmt || true
 
-      - name: Configure RISC-V musl linker
+      - name: Configure and verify RISC-V musl toolchain
         run: |
           set -eu
           export PATH="/usr/local/musl/bin:/opt/riscv64-linux-musl/bin:/opt/riscv64gc-linux-musl/bin:$PATH"
@@ -73,6 +77,33 @@ jobs:
           fi
           command -v riscv64-linux-musl-gcc
           riscv64-linux-musl-gcc --version | head -n1
+
+          headers=/usr/riscv64-linux-gnu/include
+          if [ ! -f "$headers/linux/types.h" ] || [ ! -f "$headers/asm/types.h" ]; then
+            echo "RISC-V Linux UAPI headers are missing under $headers" >&2
+            find /usr -path '*/linux/types.h' -o -path '*/asm/types.h' 2>/dev/null | sort >&2 || true
+            exit 1
+          fi
+
+          export TARGET_CFLAGS="-I$headers"
+          export CFLAGS_riscv64gc_unknown_linux_musl="$TARGET_CFLAGS"
+          export BINDGEN_EXTRA_CLANG_ARGS="--target=riscv64-unknown-linux-musl -I$headers"
+          export CC_riscv64gc_unknown_linux_musl=riscv64-linux-musl-gcc
+          {
+            echo "TARGET_CFLAGS=$TARGET_CFLAGS"
+            echo "CFLAGS_riscv64gc_unknown_linux_musl=$CFLAGS_riscv64gc_unknown_linux_musl"
+            echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_EXTRA_CLANG_ARGS"
+            echo "CC_riscv64gc_unknown_linux_musl=$CC_riscv64gc_unknown_linux_musl"
+          } >> "$GITHUB_ENV"
+
+          cat >/tmp/riscv64-uapi-smoke.c <<'EOF'
+          #include <asm/types.h>
+          #include <linux/types.h>
+          #include <linux/userfaultfd.h>
+          int main(void) { return UFFD_API == 0xaa ? 0 : 0; }
+          EOF
+          riscv64-linux-musl-gcc $TARGET_CFLAGS -c /tmp/riscv64-uapi-smoke.c -o /tmp/riscv64-uapi-smoke.o
+          file /tmp/riscv64-uapi-smoke.o
 
       - name: Build release asset
         run: tools/riscv64-release-firecracker.sh
