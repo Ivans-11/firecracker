@@ -27,6 +27,7 @@ jobs:
       ASSET_DIR: release-riscv64gc-unknown-linux-musl
       ASSET_NAME: firecracker-riscv64gc-unknown-linux-musl
       BINDGEN_EXTRA_CLANG_ARGS: -I/usr/include/x86_64-linux-gnu
+      TARGET_CFLAGS: -I/usr/include
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,6 +38,7 @@ jobs:
           apt-get install -y --no-install-recommends ca-certificates file libseccomp-dev linux-libc-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           rustup target add "$TARGET" || true
+          rustup component add rustfmt || true
 
       - name: Configure RISC-V musl linker
         run: |
