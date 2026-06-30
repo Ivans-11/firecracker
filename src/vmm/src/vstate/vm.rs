@@ -647,6 +647,10 @@ impl KvmVm {
         {
             entry.u.irqchip.irqchip = 0;
         }
+        #[cfg(target_arch = "riscv64")]
+        {
+            entry.u.irqchip.irqchip = 0;
+        }
         entry.u.irqchip.pin = gsi;
 
         self.common

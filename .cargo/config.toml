@@ -4,6 +4,9 @@ rustflags = [
   "-Ccodegen-units=1",
 ]
 
+[target.riscv64gc-unknown-linux-musl]
+linker = "riscv64-linux-musl-gcc"
+
 [net]
 git-fetch-with-cli = true
 retry = 10

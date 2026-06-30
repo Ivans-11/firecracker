@@ -93,10 +93,10 @@ pub enum AttachDeviceError {
     Bus(#[from] BusError),
     /// Error while registering ACPI with KVM: {0}
     AttachAcpiDevice(#[from] ACPIDeviceError),
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Cmdline error
     Cmdline,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Error creating serial device: {0}
     CreateSerial(#[from] std::io::Error),
     /// Error attach PCI device: {0}
@@ -173,17 +173,12 @@ impl DeviceManager {
     }
 
     fn serial_state(&self) -> Option<persist::SerialState> {
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         {
             self.mmio_devices.serial.as_ref().map(|device| {
                 let locked = device.inner.lock().expect("Poisoned lock");
                 locked.serial.state().into()
             })
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        {
-            None
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -367,6 +362,36 @@ impl DeviceManager {
 
         let rtc = Arc::new(Mutex::new(RTCDevice::new()));
         self.mmio_devices.register_mmio_rtc(vm, rtc, None)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    pub(crate) fn attach_legacy_devices_riscv64(
+        &mut self,
+        vm: &KvmVm,
+        event_manager: &mut EventManager,
+        cmdline: &mut Cmdline,
+        serial_out_path: Option<&PathBuf>,
+        serial_rate_limiter: Option<TokenBucket>,
+    ) -> Result<(), AttachDeviceError> {
+        let cmdline_contains_console = cmdline
+            .as_cstring()
+            .map_err(|_| AttachDeviceError::Cmdline)?
+            .into_string()
+            .map_err(|_| AttachDeviceError::Cmdline)?
+            .contains("console=");
+
+        if cmdline_contains_console {
+            let serial = Self::setup_serial_device(
+                event_manager,
+                serial_out_path,
+                None,
+                serial_rate_limiter,
+            )?;
+            self.mmio_devices.register_mmio_serial(vm, serial, None)?;
+            self.mmio_devices.add_mmio_serial_to_cmdline(cmdline)?;
+        }
+
         Ok(())
     }
 

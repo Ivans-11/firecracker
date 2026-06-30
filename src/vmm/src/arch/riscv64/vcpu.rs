@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use kvm_bindings::{KVM_REG_RISCV, KVM_REG_RISCV_CORE, KVM_REG_SIZE_U64};
 use kvm_ioctls::{VcpuExit, VcpuFd};
 use serde::{Deserialize, Serialize};
 
@@ -15,16 +16,12 @@ use crate::vstate::memory::{Address, GuestMemoryMmap};
 use crate::vstate::vcpu::VcpuEmulation;
 use crate::vstate::vm::KvmVm;
 
-const KVM_REG_SIZE_U64: u64 = 0x0030_0000_0000_0000;
-const KVM_REG_RISCV: u64 = 0x8000_0000_0000_0000;
-const KVM_REG_RISCV_CORE: u64 = 0x0010_0000;
-
 const RISCV_CORE_REG_PC: u64 = 0;
 const RISCV_CORE_REG_A0: u64 = 10;
 const RISCV_CORE_REG_A1: u64 = 11;
 
 fn riscv_core_reg_id(index: u64) -> u64 {
-    KVM_REG_RISCV | KVM_REG_SIZE_U64 | KVM_REG_RISCV_CORE | index
+    KVM_REG_RISCV as u64 | KVM_REG_SIZE_U64 | u64::from(KVM_REG_RISCV_CORE) | index
 }
 
 /// Errors thrown while setting RISC-V registers.
@@ -116,8 +113,7 @@ impl KvmVcpu {
         if self.index == 0 {
             self.set_u64_reg(RISCV_CORE_REG_PC, boot_ip)?;
             self.set_u64_reg(RISCV_CORE_REG_A0, 0)?;
-            // TODO: point a1 at the generated device tree once RISC-V FDT support is wired up.
-            self.set_u64_reg(RISCV_CORE_REG_A1, 0)?;
+            self.set_u64_reg(RISCV_CORE_REG_A1, super::get_fdt_addr(_mem))?;
         }
         Ok(())
     }

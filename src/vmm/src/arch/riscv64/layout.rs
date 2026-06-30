@@ -31,6 +31,11 @@ pub const GSI_MSI_END: u32 = 4095;
 /// Number of GSI available for MSI.
 pub const GSI_MSI_NUM: u32 = GSI_MSI_END - GSI_MSI_START + 1;
 
+/// Start of the RISC-V platform-level interrupt controller MMIO range.
+pub const PLIC_MEM_START: u64 = 0x0c00_0000;
+/// Size of the RISC-V platform-level interrupt controller MMIO range.
+pub const PLIC_MEM_SIZE: u64 = 0x0400_0000;
+
 /// Start of 32-bit MMIO space, matching the conventional RISC-V virt map.
 pub const MMIO32_MEM_START: u64 = 0x1000_0000;
 /// Size of 32-bit MMIO space below DRAM.
@@ -38,8 +43,10 @@ pub const MMIO32_MEM_SIZE: u64 = DRAM_MEM_START - MMIO32_MEM_START;
 
 /// Memory region start for boot device.
 pub const BOOT_DEVICE_MEM_START: u64 = MMIO32_MEM_START;
+/// Memory region start for Serial device.
+pub const SERIAL_MEM_START: u64 = BOOT_DEVICE_MEM_START + MMIO_LEN;
 /// Beginning of memory region for device MMIO 32-bit accesses.
-pub const MEM_32BIT_DEVICES_START: u64 = BOOT_DEVICE_MEM_START + MMIO_LEN;
+pub const MEM_32BIT_DEVICES_START: u64 = SERIAL_MEM_START + MMIO_LEN;
 /// Size of MMIO region reserved for PCIe configuration accesses.
 pub const PCI_MMCONFIG_SIZE: u64 = 256 << 20;
 /// Start of MMIO region reserved for PCIe configuration accesses.

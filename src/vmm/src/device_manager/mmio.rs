@@ -20,9 +20,13 @@ use vm_allocator::AllocPolicy;
 use crate::EventManager;
 use crate::arch::BOOT_DEVICE_MEM_START;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::{RTC_MEM_START, SERIAL_MEM_START};
+use crate::arch::RTC_MEM_START;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::arch::SERIAL_MEM_START;
 #[cfg(target_arch = "aarch64")]
-use crate::devices::legacy::{RTCDevice, SerialDevice};
+use crate::devices::legacy::RTCDevice;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::devices::legacy::SerialDevice;
 use crate::devices::pseudo::BootTimer;
 use crate::devices::virtio::device::{VirtioDevice, VirtioDeviceId, VirtioDeviceType};
 use crate::devices::virtio::transport::mmio::MmioTransport;
@@ -129,7 +133,7 @@ pub struct MMIODeviceManager {
     #[cfg(target_arch = "aarch64")]
     /// Real-Time clock on Aarch64 platforms
     pub(crate) rtc: Option<MMIODevice<RTCDevice>>,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Serial device on Aarch64 platforms
     pub(crate) serial: Option<MMIODevice<SerialDevice>>,
     #[cfg(target_arch = "x86_64")]
@@ -270,7 +274,7 @@ impl MMIODeviceManager {
         Ok(())
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Register an early console at the specified MMIO configuration if given as parameter,
     /// otherwise allocate a new MMIO resources for it.
     pub fn register_mmio_serial(
@@ -317,7 +321,7 @@ impl MMIODeviceManager {
         Ok(())
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Append the registered early console to the kernel cmdline.
     ///
     /// This assumes that the device has been registered with the device manager.
@@ -431,7 +435,7 @@ impl MMIODeviceManager {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn virtio_device_info(&self) -> Vec<&MMIODeviceInfo> {
         let mut device_info = Vec::new();
         for (_, dev) in self.virtio_devices.iter() {
@@ -445,7 +449,7 @@ impl MMIODeviceManager {
         self.rtc.as_ref().map(|device| &device.resources)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn serial_device_info(&self) -> Option<&MMIODeviceInfo> {
         self.serial.as_ref().map(|device| &device.resources)
     }

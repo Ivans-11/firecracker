@@ -301,6 +301,15 @@ pub fn build_microvm_for_boot(
         vm_resources.serial_rate_limiter(),
     )?;
 
+    #[cfg(target_arch = "riscv64")]
+    device_manager.attach_legacy_devices_riscv64(
+        &kvm_vm,
+        event_manager,
+        &mut boot_cmdline,
+        vm_resources.serial_out_path.as_ref(),
+        vm_resources.serial_rate_limiter(),
+    )?;
+
     device_manager.attach_vmgenid_device(&kvm_vm)?;
     device_manager.attach_vmclock_device(&kvm_vm)?;
 

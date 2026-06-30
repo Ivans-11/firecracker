@@ -1,0 +1,198 @@
+// Copyright 2026 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+use std::ffi::CString;
+
+use vm_fdt::{Error as VmFdtError, FdtWriter};
+use vm_memory::{GuestMemoryError, GuestMemoryRegion};
+
+use super::layout;
+use crate::device_manager::DeviceManager;
+use crate::device_manager::mmio::MMIODeviceInfo;
+use crate::initrd::InitrdConfig;
+use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestRegionType};
+
+const ADDRESS_CELLS: u32 = 2;
+const SIZE_CELLS: u32 = 2;
+const PLIC_PHANDLE: u32 = 1;
+const CPU_INTC_PHANDLE_BASE: u32 = 0x100;
+const PLIC_CONTEXT_SUPERVISOR_EXTERNAL: u32 = 9;
+const PLIC_CONTEXT_MACHINE_EXTERNAL: u32 = 11;
+const TIMEBASE_FREQUENCY: u32 = 10_000_000;
+const UART_CLOCK_FREQUENCY: u32 = 3_686_400;
+
+/// Errors thrown while configuring the flattened device tree for riscv64.
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub enum FdtError {
+    /// Create FDT error: {0}
+    CreateFdt(#[from] VmFdtError),
+    /// Failure in writing FDT in memory.
+    WriteFdtToMemory(#[from] GuestMemoryError),
+}
+
+/// Creates the flattened device tree for this riscv64 microVM.
+pub fn create_fdt(
+    guest_mem: &GuestMemoryMmap,
+    vcpu_count: u8,
+    cmdline: CString,
+    device_manager: &DeviceManager,
+    initrd: &Option<InitrdConfig>,
+) -> Result<Vec<u8>, FdtError> {
+    let mut fdt = FdtWriter::new()?;
+
+    let root = fdt.begin_node("")?;
+    fdt.property_string("compatible", "linux,dummy-virt")?;
+    fdt.property_string("model", "firecracker,riscv64-virt")?;
+    fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
+    fdt.property_u32("#size-cells", SIZE_CELLS)?;
+    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
+
+    create_cpu_nodes(&mut fdt, vcpu_count)?;
+    create_memory_node(&mut fdt, guest_mem)?;
+    create_chosen_node(&mut fdt, cmdline, device_manager, initrd)?;
+    create_plic_node(&mut fdt, vcpu_count)?;
+    create_devices_node(&mut fdt, device_manager)?;
+
+    fdt.end_node(root)?;
+    Ok(fdt.finish()?)
+}
+
+fn cpu_intc_phandle(cpu_index: u8) -> u32 {
+    CPU_INTC_PHANDLE_BASE + u32::from(cpu_index)
+}
+
+fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError> {
+    let cpus = fdt.begin_node("cpus")?;
+    fdt.property_u32("#address-cells", 1)?;
+    fdt.property_u32("#size-cells", 0)?;
+    fdt.property_u32("timebase-frequency", TIMEBASE_FREQUENCY)?;
+
+    for cpu_index in 0..vcpu_count {
+        let cpu = fdt.begin_node(&format!("cpu@{cpu_index:x}"))?;
+        fdt.property_string("device_type", "cpu")?;
+        fdt.property_string("compatible", "riscv")?;
+        fdt.property_string("riscv,isa", "rv64imafdc")?;
+        fdt.property_string("mmu-type", "riscv,sv48")?;
+        fdt.property_string("status", "okay")?;
+        fdt.property_u32("reg", u32::from(cpu_index))?;
+
+        let intc = fdt.begin_node("interrupt-controller")?;
+        fdt.property_null("interrupt-controller")?;
+        fdt.property_u32("#interrupt-cells", 1)?;
+        fdt.property_u32("phandle", cpu_intc_phandle(cpu_index))?;
+        fdt.property_string("compatible", "riscv,cpu-intc")?;
+        fdt.end_node(intc)?;
+
+        fdt.end_node(cpu)?;
+    }
+
+    fdt.end_node(cpus)?;
+    Ok(())
+}
+
+fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Result<(), FdtError> {
+    let dram_region = guest_mem
+        .iter()
+        .find(|region| region.region_type == GuestRegionType::Dram)
+        .unwrap();
+
+    let start_addr = dram_region.start_addr();
+    let mem_reg_prop = &[start_addr.raw_value(), dram_region.len()];
+    let mem = fdt.begin_node(&format!("memory@{:x}", start_addr.raw_value()))?;
+    fdt.property_string("device_type", "memory")?;
+    fdt.property_array_u64("reg", mem_reg_prop)?;
+    fdt.end_node(mem)?;
+    Ok(())
+}
+
+fn create_chosen_node(
+    fdt: &mut FdtWriter,
+    cmdline: CString,
+    device_manager: &DeviceManager,
+    initrd: &Option<InitrdConfig>,
+) -> Result<(), FdtError> {
+    let chosen = fdt.begin_node("chosen")?;
+    let cmdline_string = cmdline
+        .into_string()
+        .map_err(|_| VmFdtError::InvalidString)?;
+    fdt.property_string("bootargs", cmdline_string.as_str())?;
+
+    if let Some(serial_info) = device_manager.mmio_devices.serial_device_info() {
+        fdt.property_string("stdout-path", &format!("/uart@{:x}", serial_info.addr))?;
+    }
+
+    if let Some(initrd_config) = initrd {
+        fdt.property_u64("linux,initrd-start", initrd_config.address.raw_value())?;
+        fdt.property_u64(
+            "linux,initrd-end",
+            initrd_config.address.raw_value() + initrd_config.size as u64,
+        )?;
+    }
+
+    fdt.end_node(chosen)?;
+    Ok(())
+}
+
+fn create_plic_node(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError> {
+    let plic = fdt.begin_node(&format!("plic@{:x}", layout::PLIC_MEM_START))?;
+    fdt.property_string("compatible", "riscv,plic0")?;
+    fdt.property_null("interrupt-controller")?;
+    fdt.property_u32("#interrupt-cells", 1)?;
+    fdt.property_u32("#address-cells", 0)?;
+    fdt.property_u32("phandle", PLIC_PHANDLE)?;
+    fdt.property_array_u64("reg", &[layout::PLIC_MEM_START, layout::PLIC_MEM_SIZE])?;
+    fdt.property_u32("riscv,ndev", layout::GSI_LEGACY_NUM)?;
+
+    let mut interrupts_extended = Vec::with_capacity(vcpu_count as usize * 4);
+    for cpu_index in 0..vcpu_count {
+        let cpu_phandle = cpu_intc_phandle(cpu_index);
+        interrupts_extended.push(cpu_phandle);
+        interrupts_extended.push(PLIC_CONTEXT_MACHINE_EXTERNAL);
+        interrupts_extended.push(cpu_phandle);
+        interrupts_extended.push(PLIC_CONTEXT_SUPERVISOR_EXTERNAL);
+    }
+    fdt.property_array_u32("interrupts-extended", interrupts_extended.as_slice())?;
+
+    fdt.end_node(plic)?;
+    Ok(())
+}
+
+fn create_virtio_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<(), FdtError> {
+    let virtio_mmio = fdt.begin_node(&format!("virtio_mmio@{:x}", dev_info.addr))?;
+    fdt.property_null("dma-coherent")?;
+    fdt.property_string("compatible", "virtio,mmio")?;
+    fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
+    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
+    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap()])?;
+    fdt.end_node(virtio_mmio)?;
+    Ok(())
+}
+
+fn create_serial_node(fdt: &mut FdtWriter, dev_info: &MMIODeviceInfo) -> Result<(), FdtError> {
+    let serial = fdt.begin_node(&format!("uart@{:x}", dev_info.addr))?;
+    fdt.property_string("compatible", "ns16550a")?;
+    fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
+    fdt.property_u32("clock-frequency", UART_CLOCK_FREQUENCY)?;
+    fdt.property_u32("current-speed", 115_200)?;
+    fdt.property_u32("interrupt-parent", PLIC_PHANDLE)?;
+    fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap()])?;
+    fdt.end_node(serial)?;
+    Ok(())
+}
+
+fn create_devices_node(
+    fdt: &mut FdtWriter,
+    device_manager: &DeviceManager,
+) -> Result<(), FdtError> {
+    if let Some(serial_info) = device_manager.mmio_devices.serial_device_info() {
+        create_serial_node(fdt, serial_info)?;
+    }
+
+    let mut virtio_mmio = device_manager.mmio_devices.virtio_device_info();
+    virtio_mmio.sort_by_key(|info| info.addr);
+    for device_info in virtio_mmio {
+        create_virtio_node(fdt, device_info)?;
+    }
+
+    Ok(())
+}

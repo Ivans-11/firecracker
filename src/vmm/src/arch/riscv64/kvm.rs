@@ -25,10 +25,11 @@ pub struct Kvm {
 
 impl Kvm {
     /// Minimal KVM capabilities required by the architecture-independent VMM.
-    pub(crate) const DEFAULT_CAPABILITIES: [u32; 3] = [
+    pub(crate) const DEFAULT_CAPABILITIES: [u32; 4] = [
         kvm_bindings::KVM_CAP_IOEVENTFD,
         kvm_bindings::KVM_CAP_IRQFD,
         kvm_bindings::KVM_CAP_USER_MEMORY,
+        kvm_bindings::KVM_CAP_ONE_REG,
     ];
 
     /// Initialize [`Kvm`] type for RISC-V.

@@ -1,6 +1,8 @@
 // Copyright 2026 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/// Flattened device tree support.
+mod fdt;
 /// Architecture specific KVM-related code.
 pub mod kvm;
 /// Layout for this RISC-V system.
@@ -40,6 +42,8 @@ pub enum ConfigurationError {
     KernelFile,
     /// Cannot load kernel due to invalid memory configuration or invalid kernel image: {0}
     KernelLoader(#[from] linux_loader::loader::Error),
+    /// Cannot configure the device tree: {0}
+    SetupFdt(#[from] fdt::FdtError),
     /// Error creating vcpu configuration: {0}
     VcpuConfig(#[from] CpuConfigurationError),
     /// Error configuring the vcpu: {0}
@@ -79,13 +83,13 @@ pub fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
 pub fn configure_system_for_boot(
     _kvm: &crate::Kvm,
     vm: &KvmVm,
-    _device_manager: &mut DeviceManager,
+    device_manager: &mut DeviceManager,
     vcpus: &mut [Vcpu],
     machine_config: &MachineConfig,
     cpu_template: &CustomCpuTemplate,
     entry_point: EntryPoint,
-    _initrd: &Option<InitrdConfig>,
-    _boot_cmdline: Cmdline,
+    initrd: &Option<InitrdConfig>,
+    boot_cmdline: Cmdline,
 ) -> Result<(), ConfigurationError> {
     let cpu_config = CpuConfiguration::new(cpu_template)?;
     let cpu_config = CpuConfiguration::apply_template(cpu_config, cpu_template);
@@ -100,6 +104,21 @@ pub fn configure_system_for_boot(
         vcpu.kvm_vcpu
             .configure(vm.guest_memory(), entry_point, &vcpu_config)?;
     }
+
+    let cmdline = boot_cmdline
+        .as_cstring()
+        .expect("Cannot create cstring from cmdline string");
+    let fdt = fdt::create_fdt(
+        vm.guest_memory(),
+        machine_config.vcpu_count,
+        cmdline,
+        device_manager,
+        initrd,
+    )?;
+    vm.guest_memory().write_slice(
+        fdt.as_slice(),
+        GuestAddress(get_fdt_addr(vm.guest_memory())),
+    )?;
 
     Ok(())
 }
