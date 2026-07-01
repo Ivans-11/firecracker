@@ -7,6 +7,7 @@ use vm_fdt::{Error as VmFdtError, FdtWriter};
 use vm_memory::{GuestMemoryError, GuestMemoryRegion};
 
 use super::layout;
+use super::vcpu::RiscvIsaExtensions;
 use crate::device_manager::DeviceManager;
 use crate::device_manager::mmio::MMIODeviceInfo;
 use crate::initrd::InitrdConfig;
@@ -17,10 +18,19 @@ const SIZE_CELLS: u32 = 2;
 const APLIC_PHANDLE: u32 = 1;
 const IMSIC_PHANDLE: u32 = 2;
 const CPU_INTC_PHANDLE_BASE: u32 = 0x100;
-const IRQ_TYPE_LEVEL_HIGH: u32 = 4;
+const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const RISCV_SUPERVISOR_EXTERNAL_IRQ: u32 = 9;
 const TIMEBASE_FREQUENCY: u32 = 10_000_000;
 const UART_CLOCK_FREQUENCY: u32 = 3_686_400;
+
+/// RISC-V platform features that are safe to expose to the guest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RiscvPlatformFeatures {
+    /// Expose the AIA interrupt controller nodes.
+    pub aia: bool,
+    /// Expose CPU ISA extensions.
+    pub isa: RiscvIsaExtensions,
+}
 
 /// Errors thrown while configuring the flattened device tree for riscv64.
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -38,7 +48,7 @@ pub fn create_fdt(
     cmdline: CString,
     device_manager: &DeviceManager,
     initrd: &Option<InitrdConfig>,
-    use_aia: bool,
+    features: RiscvPlatformFeatures,
 ) -> Result<Vec<u8>, FdtError> {
     let mut fdt = FdtWriter::new()?;
 
@@ -47,17 +57,13 @@ pub fn create_fdt(
     fdt.property_string("model", "firecracker,riscv64-virt")?;
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
-    if use_aia {
-        fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
-    }
-
-    create_cpu_nodes(&mut fdt, vcpu_count)?;
+    create_cpu_nodes(&mut fdt, vcpu_count, features.isa)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, device_manager, initrd)?;
-    if use_aia {
+    if features.aia {
         create_aia_nodes(&mut fdt, vcpu_count)?;
     }
-    create_devices_node(&mut fdt, device_manager, use_aia)?;
+    create_devices_node(&mut fdt, device_manager, features.aia)?;
 
     fdt.end_node(root)?;
     Ok(fdt.finish()?)
@@ -67,7 +73,11 @@ fn cpu_intc_phandle(cpu_index: u8) -> u32 {
     CPU_INTC_PHANDLE_BASE + u32::from(cpu_index)
 }
 
-fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError> {
+fn create_cpu_nodes(
+    fdt: &mut FdtWriter,
+    vcpu_count: u8,
+    isa: RiscvIsaExtensions,
+) -> Result<(), FdtError> {
     let cpus = fdt.begin_node("cpus")?;
     fdt.property_u32("#address-cells", 1)?;
     fdt.property_u32("#size-cells", 0)?;
@@ -77,7 +87,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
         let cpu = fdt.begin_node(&format!("cpu@{cpu_index:x}"))?;
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "riscv")?;
-        fdt.property_string("riscv,isa", "rv64imafdc")?;
+        fdt.property_string("riscv,isa", riscv_isa_string(isa).as_str())?;
         fdt.property_string("mmu-type", "riscv,sv48")?;
         fdt.property_string("status", "okay")?;
         fdt.property_u32("reg", u32::from(cpu_index))?;
@@ -94,6 +104,17 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
 
     fdt.end_node(cpus)?;
     Ok(())
+}
+
+fn riscv_isa_string(isa: RiscvIsaExtensions) -> String {
+    let mut isa_string = String::from("rv64imafdc_zicsr_zifencei");
+    if isa.ssaia {
+        isa_string.push_str("_ssaia");
+    }
+    if isa.sstc {
+        isa_string.push_str("_sstc");
+    }
+    isa_string
 }
 
 fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Result<(), FdtError> {
@@ -144,11 +165,15 @@ fn create_aia_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
         "interrupt-controller@{:x}",
         layout::AIA_IMSIC_MEM_START
     ))?;
-    fdt.property_string("compatible", "riscv,imsics")?;
+    fdt.property_string_list(
+        "compatible",
+        vec!["qemu,imsics".to_string(), "riscv,imsics".to_string()],
+    )?;
     fdt.property_null("interrupt-controller")?;
     fdt.property_null("msi-controller")?;
     fdt.property_u32("#interrupt-cells", 0)?;
     fdt.property_u32("phandle", IMSIC_PHANDLE)?;
+    fdt.property_u32("riscv,guest-index-bits", layout::AIA_IMSIC_GUEST_INDEX_BITS)?;
     fdt.property_u32("riscv,num-ids", layout::AIA_IMSIC_NUM_IDS)?;
     fdt.property_array_u64(
         "reg",
@@ -171,7 +196,10 @@ fn create_aia_nodes(fdt: &mut FdtWriter, vcpu_count: u8) -> Result<(), FdtError>
         "interrupt-controller@{:x}",
         layout::AIA_APLIC_MEM_START
     ))?;
-    fdt.property_string("compatible", "riscv,aplic")?;
+    fdt.property_string_list(
+        "compatible",
+        vec!["qemu,aplic".to_string(), "riscv,aplic".to_string()],
+    )?;
     fdt.property_null("interrupt-controller")?;
     fdt.property_u32("#interrupt-cells", 2)?;
     fdt.property_u32("#address-cells", 0)?;
@@ -197,7 +225,7 @@ fn create_virtio_node(
     fdt.property_array_u64("reg", &[dev_info.addr, dev_info.len])?;
     if use_aia {
         fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
-        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_EDGE_RISING])?;
     }
     fdt.end_node(virtio_mmio)?;
     Ok(())
@@ -215,7 +243,7 @@ fn create_serial_node(
     fdt.property_u32("current-speed", 115_200)?;
     if use_aia {
         fdt.property_u32("interrupt-parent", APLIC_PHANDLE)?;
-        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_LEVEL_HIGH])?;
+        fdt.property_array_u32("interrupts", &[dev_info.gsi.unwrap(), IRQ_TYPE_EDGE_RISING])?;
     }
     fdt.end_node(serial)?;
     Ok(())

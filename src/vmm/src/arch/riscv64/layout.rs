@@ -21,7 +21,7 @@ pub const FDT_MAX_SIZE: usize = 0x20_0000;
 /// RISC-V interrupt IDs exposed through the platform interrupt controller.
 pub const GSI_LEGACY_START: u32 = 1;
 /// Number of legacy GSIs reserved for MMIO devices.
-pub const GSI_LEGACY_NUM: u32 = 256;
+pub const GSI_LEGACY_NUM: u32 = 96;
 /// Last legacy GSI.
 pub const GSI_LEGACY_END: u32 = GSI_LEGACY_START + GSI_LEGACY_NUM - 1;
 /// First GSI used by MSI after legacy GSI.
@@ -39,6 +39,8 @@ pub const AIA_APLIC_MEM_SIZE: u64 = 0x4000;
 pub const AIA_IMSIC_MEM_START: u64 = 0x2800_0000;
 /// Size of one RISC-V AIA IMSIC MMIO page.
 pub const AIA_IMSIC_MEM_SIZE: u64 = 0x1000;
+/// Number of guest interrupt file index bits exposed by the guest IMSIC.
+pub const AIA_IMSIC_GUEST_INDEX_BITS: u32 = 3;
 /// Number of interrupt identities exposed by the guest IMSIC.
 pub const AIA_IMSIC_NUM_IDS: u32 = 255;
 

@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::fmt::Debug;
 use std::fs::File;
 
-use kvm_ioctls::Cap;
 use linux_loader::loader::pe::PE as Loader;
 use linux_loader::loader::{Cmdline, KernelLoader};
 use vm_memory::{GuestMemoryError, GuestMemoryRegion};
@@ -105,6 +104,14 @@ pub fn configure_system_for_boot(
         vcpu.kvm_vcpu
             .configure(vm.guest_memory(), entry_point, &vcpu_config)?;
     }
+    let isa_extensions = vcpus
+        .first()
+        .map(|vcpu| vcpu.kvm_vcpu.isa_extensions())
+        .unwrap_or_default();
+    let platform_features = fdt::RiscvPlatformFeatures {
+        aia: vm.has_aia_device() && isa_extensions.ssaia,
+        isa: isa_extensions,
+    };
 
     let cmdline = boot_cmdline
         .as_cstring()
@@ -115,7 +122,7 @@ pub fn configure_system_for_boot(
         cmdline,
         device_manager,
         initrd,
-        vm.common.fd.check_extension(Cap::DeviceCtrl),
+        platform_features,
     )?;
     vm.guest_memory().write_slice(
         fdt.as_slice(),

@@ -3,7 +3,11 @@
 
 use std::sync::Arc;
 
-use kvm_bindings::{KVM_REG_RISCV, KVM_REG_RISCV_CORE, KVM_REG_SIZE_U64};
+use kvm_bindings::{
+    KVM_REG_RISCV, KVM_REG_RISCV_CORE, KVM_REG_RISCV_ISA_EXT, KVM_REG_RISCV_ISA_SINGLE,
+    KVM_REG_SIZE_U64, KVM_RISCV_ISA_EXT_ID_KVM_RISCV_ISA_EXT_SSAIA,
+    KVM_RISCV_ISA_EXT_ID_KVM_RISCV_ISA_EXT_SSTC,
+};
 use kvm_ioctls::{VcpuExit, VcpuFd};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +26,23 @@ const RISCV_CORE_REG_A1: u64 = 11;
 
 fn riscv_core_reg_id(index: u64) -> u64 {
     KVM_REG_RISCV as u64 | KVM_REG_SIZE_U64 | u64::from(KVM_REG_RISCV_CORE) | index
+}
+
+fn riscv_isa_ext_reg_id(index: u32) -> u64 {
+    KVM_REG_RISCV as u64
+        | KVM_REG_SIZE_U64
+        | u64::from(KVM_REG_RISCV_ISA_EXT)
+        | u64::from(KVM_REG_RISCV_ISA_SINGLE)
+        | u64::from(index)
+}
+
+/// RISC-V CPU ISA extensions exposed by KVM to the guest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RiscvIsaExtensions {
+    /// Supervisor Advanced Interrupt Architecture.
+    pub ssaia: bool,
+    /// Supervisor-mode timer compare.
+    pub sstc: bool,
 }
 
 /// Errors thrown while setting RISC-V registers.
@@ -104,6 +125,14 @@ impl KvmVcpu {
         Ok(CpuConfiguration::default())
     }
 
+    /// Returns the RISC-V ISA extensions that are enabled for this vCPU.
+    pub fn isa_extensions(&self) -> RiscvIsaExtensions {
+        RiscvIsaExtensions {
+            ssaia: self.is_isa_extension_enabled(KVM_RISCV_ISA_EXT_ID_KVM_RISCV_ISA_EXT_SSAIA),
+            sstc: self.is_isa_extension_enabled(KVM_RISCV_ISA_EXT_ID_KVM_RISCV_ISA_EXT_SSTC),
+        }
+    }
+
     /// Configure relevant boot registers for a given vCPU.
     pub fn setup_boot_regs(
         &self,
@@ -124,6 +153,12 @@ impl KvmVcpu {
             .set_one_reg(id, &value.to_le_bytes())
             .map(|_| ())
             .map_err(|err| VcpuArchError::SetOneReg(id, format!("{value:#x}"), err))
+    }
+
+    fn is_isa_extension_enabled(&self, index: u32) -> bool {
+        let id = riscv_isa_ext_reg_id(index);
+        let mut value = 0u64.to_le_bytes();
+        self.fd.get_one_reg(id, &mut value).is_ok() && u64::from_le_bytes(value) != 0
     }
 }
 

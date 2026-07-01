@@ -13,11 +13,11 @@ use kvm_ioctls::{Cap, DeviceFd};
 use serde::{Deserialize, Serialize};
 
 use super::layout;
-use crate::Kvm;
 use crate::snapshot::Persist;
 use crate::vstate::memory::{GuestMemoryExtension, GuestMemoryState};
 use crate::vstate::resources::{ResourceAllocator, ResourceAllocatorState};
 use crate::vstate::vm::{VmCommon, VmError};
+use crate::{Kvm, logger};
 
 /// RISC-V KVM VM wrapper.
 #[derive(Debug)]
@@ -58,9 +58,18 @@ impl KvmVm {
     /// Post-vCPU creation setup.
     pub fn arch_post_create_vcpus(&mut self, vcpu_count: u8) -> Result<(), KvmVmError> {
         if self.common.fd.check_extension(Cap::DeviceCtrl) {
-            self.create_aia_device(vcpu_count)?;
+            if let Err(err) = self.create_aia_device(vcpu_count) {
+                logger::warn!(
+                    "RISC-V AIA device setup failed; falling back to non-AIA guest FDT: {err}"
+                );
+            }
         }
         Ok(())
+    }
+
+    /// Returns whether the VM has a configured RISC-V AIA interrupt controller.
+    pub fn has_aia_device(&self) -> bool {
+        self.aia_device.is_some()
     }
 
     /// Saves and returns the KVM VM state.
