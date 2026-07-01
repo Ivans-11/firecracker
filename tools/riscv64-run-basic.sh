@@ -21,8 +21,8 @@ Optional:
 
 Example:
   KERNEL_IMAGE=/opt/riscv/Image \
+  INITRD_IMAGE=/opt/riscv/initramfs.cpio.gz \
   ROOTFS_IMAGE=/opt/riscv/rootfs.ext4 \
-  FC_BIN=build/cargo_target/riscv64gc-unknown-linux-musl/debug/firecracker \
   tools/riscv64-run-basic.sh
 EOF
 }
@@ -37,7 +37,7 @@ if [[ -z "${KERNEL_IMAGE:-}" ]]; then
     exit 2
 fi
 
-FC_BIN="${FC_BIN:-build/cargo_target/riscv64gc-unknown-linux-musl/debug/firecracker}"
+FC_BIN="${FC_BIN:-release-riscv64gc-unknown-linux-musl/firecracker-riscv64gc-unknown-linux-musl}"
 VCPUS="${VCPUS:-1}"
 MEM_MIB="${MEM_MIB:-128}"
 BOOT_ARGS="${BOOT_ARGS:-console=ttyS0 reboot=k panic=1}"
@@ -66,12 +66,52 @@ tmpdir="$(mktemp -d /tmp/fc-riscv64.XXXXXX)"
 trap 'rm -rf "$tmpdir"' EXIT
 config="$tmpdir/vm.json"
 
+if [[ -z "${ROOTFS_IMAGE:-}" && -z "${INITRD_IMAGE:-}" ]]; then
+    echo "Set ROOTFS_IMAGE, INITRD_IMAGE, or both." >&2
+    exit 2
+fi
+
+if [[ -n "${INITRD_IMAGE:-}" ]]; then
+    if [[ ! -f "$INITRD_IMAGE" ]]; then
+        echo "Initrd image does not exist: $INITRD_IMAGE" >&2
+        exit 1
+    fi
+fi
+
 if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
     if [[ ! -f "$ROOTFS_IMAGE" ]]; then
         echo "Rootfs image does not exist: $ROOTFS_IMAGE" >&2
         exit 1
     fi
-    BOOT_ARGS="${BOOT_ARGS} root=/dev/vda ro"
+    if [[ ! "$BOOT_ARGS" =~ (^|[[:space:]])root= ]]; then
+        BOOT_ARGS="${BOOT_ARGS} root=/dev/vda ro"
+    fi
+fi
+
+if [[ -n "${ROOTFS_IMAGE:-}" && -n "${INITRD_IMAGE:-}" ]]; then
+    cat >"$config" <<EOF
+{
+  "boot-source": {
+    "kernel_image_path": "$KERNEL_IMAGE",
+    "initrd_path": "$INITRD_IMAGE",
+    "boot_args": "$BOOT_ARGS"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "$ROOTFS_IMAGE",
+      "is_root_device": true,
+      "is_read_only": false
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": $VCPUS,
+    "mem_size_mib": $MEM_MIB,
+    "smt": false
+  }
+}
+EOF
+elif [[ -n "${ROOTFS_IMAGE:-}" ]]; then
     cat >"$config" <<EOF
 {
   "boot-source": {
@@ -93,11 +133,7 @@ if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
   }
 }
 EOF
-elif [[ -n "${INITRD_IMAGE:-}" ]]; then
-    if [[ ! -f "$INITRD_IMAGE" ]]; then
-        echo "Initrd image does not exist: $INITRD_IMAGE" >&2
-        exit 1
-    fi
+else
     cat >"$config" <<EOF
 {
   "boot-source": {
@@ -112,9 +148,6 @@ elif [[ -n "${INITRD_IMAGE:-}" ]]; then
   }
 }
 EOF
-else
-    echo "Set either ROOTFS_IMAGE or INITRD_IMAGE." >&2
-    exit 2
 fi
 
 exec "$FC_BIN" --no-api --no-seccomp --config-file "$config" --level Debug
